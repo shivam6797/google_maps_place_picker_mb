@@ -18,7 +18,7 @@ class AutoCompleteSearch extends StatefulWidget {
       this.hintText = "Search here",
       this.searchingText = "Searching...",
       this.hidden = false,
-      this.height = 40,
+      this.height = 46,
       this.contentPadding = EdgeInsets.zero,
       this.debounceMilliseconds,
       this.onSearchFailed,
@@ -33,7 +33,8 @@ class AutoCompleteSearch extends StatefulWidget {
       this.initialSearchString,
       this.searchForInitialValue,
       this.autocompleteOnTrailingWhitespace})
-      : super(key: key);
+      : assert(searchBarController != null),
+        super(key: key);
 
   final String? sessionToken;
   final String? hintText;
@@ -104,8 +105,8 @@ class AutoCompleteSearchState extends State<AutoCompleteSearch> {
         height: widget.height,
         padding: const EdgeInsets.only(right: 10),
         color: Theme.of(context).brightness == Brightness.dark ? Colors.black54 : Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        elevation: 4.0,
+        borderRadius: BorderRadius.circular(8),
+        elevation: 0,
         child: Row(
           children: <Widget>[
             SizedBox(width: 10),
