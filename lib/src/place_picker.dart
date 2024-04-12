@@ -9,7 +9,7 @@ import 'package:google_maps_place_picker_mb/providers/place_provider.dart';
 import 'package:google_maps_place_picker_mb/src/autocomplete_search.dart';
 import 'package:google_maps_place_picker_mb/src/controllers/autocomplete_search_controller.dart';
 import 'package:google_maps_place_picker_mb/src/google_map_place_picker.dart';
-import 'package:google_maps_webservice/places.dart';
+import 'package:flutter_google_maps_webservices/places.dart';
 import 'package:http/http.dart';
 import 'package:provider/provider.dart';
 import 'dart:io' show Platform;
@@ -65,11 +65,11 @@ class PlacePicker extends StatefulWidget {
     this.resizeToAvoidBottomInset = true,
     this.initialSearchString,
     this.searchForInitialValue = false,
-    this.forceAndroidLocationManager = false,
     this.forceSearchOnZoomChanged = false,
     this.automaticallyImplyAppBarLeading = true,
     this.autocompleteOnTrailingWhitespace = false,
     this.hidePlaceDetailsWhenDraggingPin = true,
+    this.ignoreLocationPermissionErrors = false,
     this.onTapBack,
     this.onCameraMoveStarted,
     this.onCameraMove,
@@ -169,11 +169,6 @@ class PlacePicker extends StatefulWidget {
   /// Whether to search for the initial value or not
   final bool searchForInitialValue;
 
-  /// On Android devices you can set [forceAndroidLocationManager]
-  /// to true to force the plugin to use the [LocationManager] to determine the
-  /// position instead of the [FusedLocationProviderClient]. On iOS this is ignored.
-  final bool forceAndroidLocationManager;
-
   /// Allow searching place when zoom has changed. By default searching is disabled when zoom has changed in order to prevent unwilling API usage.
   final bool forceSearchOnZoomChanged;
 
@@ -187,7 +182,12 @@ class PlacePicker extends StatefulWidget {
   /// Defaults to false.
   final bool autocompleteOnTrailingWhitespace;
 
+  /// Whether to hide place details when dragging pin. Defaults to true.
   final bool hidePlaceDetailsWhenDraggingPin;
+
+  /// Whether to ignore location permission errors. Defaults to false.
+  /// If this is set to `true` the UI will be blocked.
+  final bool ignoreLocationPermissionErrors;
 
   // Raised when clicking on the back arrow.
   // This will not listen for the system back button on Android devices.
@@ -226,8 +226,10 @@ class PlacePicker extends StatefulWidget {
   /// Called when the map type has been changed.
   final Function(MapType)? onMapTypeChanged;
 
-  /// Allow user to make visible the zoom button & toggle on & off zoom gestures
+  /// Toggle on & off zoom gestures
   final bool zoomGesturesEnabled;
+
+  /// Allow user to make visible the zoom button
   final bool zoomControlsEnabled;
 
   @override
@@ -267,7 +269,8 @@ class _PlacePickerState extends State<PlacePicker> {
     provider.desiredAccuracy = widget.desiredLocationAccuracy;
     provider.setMapType(widget.initialMapType);
     if (widget.useCurrentLocation != null && widget.useCurrentLocation!) {
-      await provider.updateCurrentLocation(widget.forceAndroidLocationManager);
+      await provider.updateCurrentLocation(
+          gracefully: widget.ignoreLocationPermissionErrors);
     }
     return provider;
   }
@@ -275,82 +278,83 @@ class _PlacePickerState extends State<PlacePicker> {
   @override
   Widget build(BuildContext context) {
     return WillPopScope(
-      onWillPop: () {
-        searchBarController.clearOverlay();
-        return Future.value(true);
-      },
-      child: FutureBuilder<PlaceProvider>(
-        future: _futureProvider,
-        builder: (context, snapshot) {
-          if(snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          } else if (snapshot.hasData) {
-            provider = snapshot.data;
-
-            return MultiProvider(
-              providers: [
-                ChangeNotifierProvider<PlaceProvider>.value(value: provider!),
-              ],
-              child: Stack(children: [
-                Scaffold(
-                  key: ValueKey<int>(provider.hashCode),
-                  resizeToAvoidBottomInset: widget.resizeToAvoidBottomInset,
-                  extendBodyBehindAppBar: true,
-                  appBar: AppBar(
-                    key: appBarKey,
-                    automaticallyImplyLeading: false,
-                    iconTheme: Theme.of(context).iconTheme,
-                    elevation: 0,
-                    backgroundColor: Colors.transparent,
-                    titleSpacing: 0.0,
-                    title: _buildSearchBar(context),
+        onWillPop: () {
+          searchBarController.clearOverlay();
+          return Future.value(true);
+        },
+        child: FutureBuilder<PlaceProvider>(
+          future: _futureProvider,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            } else if (snapshot.hasData) {
+              provider = snapshot.data;
+              return MultiProvider(
+                providers: [
+                  ChangeNotifierProvider<PlaceProvider>.value(value: provider!),
+                ],
+                child: Stack(children: [
+                  Scaffold(
+                    key: ValueKey<int>(provider.hashCode),
+                    resizeToAvoidBottomInset: widget.resizeToAvoidBottomInset,
+                    extendBodyBehindAppBar: true,
+                    appBar: AppBar(
+                      key: appBarKey,
+                      automaticallyImplyLeading: false,
+                      iconTheme: Theme.of(context).iconTheme,
+                      elevation: 0,
+                      backgroundColor: Colors.transparent,
+                      titleSpacing: 0.0,
+                      title: _buildSearchBar(context),
+                    ),
+                    body: _buildMapWithLocation(),
                   ),
-                  body: _buildMapWithLocation(),
-                ),
                   _buildIntroModal(context),
                 ]),
+              );
+            }
+
+            final children = <Widget>[];
+            if (snapshot.hasError) {
+              children.addAll([
+                Icon(
+                  Icons.error_outline,
+                  color: Theme.of(context).colorScheme.error,
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 16),
+                  child: Text('Error: ${snapshot.error}'),
+                )
+              ]);
+            } else {
+              children.add(CircularProgressIndicator());
+            }
+
+            return Scaffold(
+              body: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: children,
+                ),
+              ),
             );
-          }
-
-          final children = <Widget>[];
-          if (snapshot.hasError) {
-            children.addAll([
-              Icon(
-                Icons.error_outline,
-                color: Theme.of(context).errorColor,
-              ),
-              Padding(
-                padding: const EdgeInsets.only(top: 16),
-                child: Text('Error: ${snapshot.error}'),
-              )
-            ]);
-          } else {
-            children.add(CircularProgressIndicator());
-          }
-
-          return Scaffold(
-            body: Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: children,
-              ),
-            ),
-          );
-        },
-      )
-    );
+          },
+        ));
   }
 
   Widget _buildSearchBar(BuildContext context) {
     return Row(
       children: <Widget>[
-        widget.automaticallyImplyAppBarLeading ||
-        widget.onTapBack != null
+        SizedBox(width: 15),
+        provider!.placeSearchingState == SearchingState.Idle &&
+                (widget.automaticallyImplyAppBarLeading ||
+                    widget.onTapBack != null)
             ? IconButton(
                 onPressed: () {
                   if (!showIntroModal ||
                       widget.introModalWidgetBuilder == null) {
+                    provider?.debounceTimer?.cancel();
                     if (widget.onTapBack != null) {
                       widget.onTapBack!();
                       return;
@@ -363,7 +367,7 @@ class _PlacePickerState extends State<PlacePicker> {
                 ),
                 color: Colors.black.withAlpha(128),
                 padding: EdgeInsets.zero)
-            : SizedBox(width: 15),
+            : Container(),
         Expanded(
           child: AutoCompleteSearch(
               appBarKey: appBarKey,
@@ -373,7 +377,9 @@ class _PlacePickerState extends State<PlacePicker> {
               searchingText: widget.searchingText,
               debounceMilliseconds: widget.autoCompleteDebounceInMilliseconds,
               onPicked: (prediction) {
-                _pickPrediction(prediction);
+                if (mounted) {
+                  _pickPrediction(prediction);
+                }
               },
               onSearchFailed: (status) {
                 if (widget.onAutoCompleteFailed != null) {
@@ -389,7 +395,8 @@ class _PlacePickerState extends State<PlacePicker> {
               region: widget.region,
               initialSearchString: widget.initialSearchString,
               searchForInitialValue: widget.searchForInitialValue,
-              autocompleteOnTrailingWhitespace: widget.autocompleteOnTrailingWhitespace),
+              autocompleteOnTrailingWhitespace:
+                  widget.autocompleteOnTrailingWhitespace),
         ),
         SizedBox(width: 5),
       ],
@@ -399,13 +406,15 @@ class _PlacePickerState extends State<PlacePicker> {
   _pickPrediction(Prediction prediction) async {
     provider!.placeSearchingState = SearchingState.Searching;
 
-    final PlacesDetailsResponse response = await provider!.places.getDetailsByPlaceId(
+    final PlacesDetailsResponse response =
+        await provider!.places.getDetailsByPlaceId(
       prediction.placeId!,
       sessionToken: provider!.sessionToken,
       language: widget.autocompleteLanguage,
     );
 
-    if (response.errorMessage?.isNotEmpty == true || response.status == "REQUEST_DENIED") {
+    if (response.errorMessage?.isNotEmpty == true ||
+        response.status == "REQUEST_DENIED") {
       if (widget.onAutoCompleteFailed != null) {
         widget.onAutoCompleteFailed!(response.status);
       }
@@ -417,16 +426,17 @@ class _PlacePickerState extends State<PlacePicker> {
     // Prevents searching again by camera movement.
     provider!.isAutoCompleteSearching = true;
 
-    await _moveTo(provider!.selectedPlace!.geometry!.location.lat, provider!.selectedPlace!.geometry!.location.lng);
+    await _moveTo(provider!.selectedPlace!.geometry!.location.lat,
+        provider!.selectedPlace!.geometry!.location.lng);
 
+    if (provider == null) return;
     provider!.placeSearchingState = SearchingState.Idle;
   }
 
   _moveTo(double latitude, double longitude) async {
+    if (provider?.mapController == null) return;
     GoogleMapController? controller = provider!.mapController;
-    if (controller == null) return;
-
-    await controller.animateCamera(
+    await controller!.animateCamera(
       CameraUpdate.newCameraPosition(
         CameraPosition(
           target: LatLng(latitude, longitude),
@@ -437,16 +447,17 @@ class _PlacePickerState extends State<PlacePicker> {
   }
 
   _moveToCurrentPosition() async {
-    if (provider!.currentPosition != null) {
-      await _moveTo(provider!.currentPosition!.latitude, provider!.currentPosition!.longitude);
-    }
+    if (provider?.currentPosition == null) return;
+    await _moveTo(provider!.currentPosition!.latitude,
+        provider!.currentPosition!.longitude);
   }
 
   Widget _buildMapWithLocation() {
     if (provider!.currentPosition == null) {
       return _buildMap(widget.initialPosition);
     }
-    return _buildMap(LatLng(provider!.currentPosition!.latitude, provider!.currentPosition!.longitude));
+    return _buildMap(LatLng(provider!.currentPosition!.latitude,
+        provider!.currentPosition!.longitude));
   }
 
   Widget _buildMap(LatLng initialTarget) {
@@ -471,23 +482,27 @@ class _PlacePickerState extends State<PlacePicker> {
       selectText: widget.selectText,
       outsideOfPickAreaText: widget.outsideOfPickAreaText,
       onToggleMapType: () {
+        if (provider == null) return;
         provider!.switchMapType();
-        if(widget.onMapTypeChanged != null) {
+        if (widget.onMapTypeChanged != null) {
           widget.onMapTypeChanged!(provider!.mapType);
         }
       },
       onMyLocation: () async {
         // Prevent to click many times in short period.
+        if (provider == null) return;
         if (provider!.isOnUpdateLocationCooldown == false) {
           provider!.isOnUpdateLocationCooldown = true;
           Timer(Duration(seconds: widget.myLocationButtonCooldown), () {
             provider!.isOnUpdateLocationCooldown = false;
           });
-          await provider!.updateCurrentLocation(widget.forceAndroidLocationManager);
+          await provider!.updateCurrentLocation(
+              gracefully: widget.ignoreLocationPermissionErrors);
           await _moveToCurrentPosition();
         }
       },
       onMoveStart: () {
+        if (provider == null) return;
         searchBarController.reset();
       },
       onPlacePicked: widget.onPlacePicked,
@@ -504,28 +519,29 @@ class _PlacePickerState extends State<PlacePicker> {
         builder: (BuildContext context, StateSetter setState) {
       return showIntroModal && widget.introModalWidgetBuilder != null
           ? Stack(children: [
-            Positioned(
-              top: 0,
-              right: 0,
-              bottom: 0,
-              left: 0,
-              child: Material(
-                type: MaterialType.canvas,
-                color: Color.fromARGB(128, 0, 0, 0),
-                shape: RoundedRectangleBorder(
+              Positioned(
+                top: 0,
+                right: 0,
+                bottom: 0,
+                left: 0,
+                child: Material(
+                  type: MaterialType.canvas,
+                  color: Color.fromARGB(128, 0, 0, 0),
+                  shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.zero,
+                  ),
+                  child: ClipRect(),
                 ),
-                child: ClipRect(),
               ),
-            ),
-            widget.introModalWidgetBuilder!(context, () {
-              setState(() {
-                showIntroModal = false;
-              });
-            })
-          ])
-        : Container();
-      }
-    );
+              widget.introModalWidgetBuilder!(context, () {
+                if (mounted) {
+                  setState(() {
+                    showIntroModal = false;
+                  });
+                }
+              })
+            ])
+          : Container();
+    });
   }
 }
